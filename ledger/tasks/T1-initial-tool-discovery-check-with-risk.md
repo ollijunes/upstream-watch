@@ -1,8 +1,8 @@
 # T1 Initial tool: discovery, check with risk flags, report, ff-only update, launchd
 
-- Status: doing
+- Status: done
 - Lane: feat/initial-tool-20261020
-- Evidence: —
+- Evidence: CI 11/11 with tests on Linux and macOS (Intel runner) × Python 3.11–3.14, lint, secrets and ledger: https://github.com/ollijunes/upstream-watch/actions/runs/39483614841
 
 ## Plan
 
