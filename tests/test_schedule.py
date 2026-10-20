@@ -44,7 +44,10 @@ def test_systemd(tmp_path):
             target = tmp_path / path.name
             target.write_bytes(data)
             targets.append(str(target))
-        subprocess.run([binary, "--user", "verify", *targets], check=True, capture_output=True)
+        verified = subprocess.run(
+            [binary, "--user", "verify", *targets], capture_output=True, text=True
+        )
+        assert verified.returncode == 0, verified.stdout + verified.stderr
     daily = render(tmp_path, tmp_path / "config.toml", platform="systemd")
     assert b"OnCalendar=*-*-*" in list(daily.values())[1]
 
