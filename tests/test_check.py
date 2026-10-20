@@ -51,7 +51,7 @@ def test_changelog_caps_and_merge_titles(clone):
     assert len(log["groups"]["feat"]) == 10
     assert log["merges"] == 1
     assert log["merge_subjects"] == ["Merge PR \\[title\\]"]
-    assert "<" not in escape("<script>\x1b\u202etest")
+    assert escape("<script>\x1b\u202etest") == r"\<script\>test"
 
 
 def test_tags_and_force_push(clone, saved):
@@ -69,7 +69,7 @@ def test_tags_and_force_push(clone, saved):
     assert exit_code([result]) == 20
 
 
-def test_moved_tag_preserves_state_on_fetch_rejection(clone, saved):
+def test_moved_tag_updates_tool_namespace(clone, saved):
     clone.tag("v1")
     check_repo(clone.repo, saved)
     previous = copy.deepcopy(saved)
@@ -78,8 +78,8 @@ def test_moved_tag_preserves_state_on_fetch_rejection(clone, saved):
     git(clone.source, "push", "--force", "origin", "refs/tags/v1")
     result = check_repo(clone.repo, saved)
     assert "tag moved: v1" in reasons(result)
-    assert result.status == "fetch failed"
-    assert saved == previous
+    assert result.status == "checked"
+    assert saved["repos"][clone.repo.key]["tags"] != previous["repos"][clone.repo.key]["tags"]
 
 
 def test_missing_tip_and_changed_default(clone, saved):
@@ -311,7 +311,7 @@ def test_releases_and_verification(clone, saved, fake_api):
     assert len(result.releases) == 1
     assert len(result.releases[0]["notes"].splitlines()) == 20
     assert "not API verified" in reasons(result)
-    assert requests[0][1]["Authorization"] == f"Bearer {token}"
+    assert "Authorization" not in requests[0][1]
     requests.clear()
     api = GitHub({}, base=base)
     clone.tag("v3", annotated=True)
@@ -339,7 +339,8 @@ def test_fetch_and_halfway_failure_isolation(clone, factory, saved, monkeypatch)
     result = check_repo(clone.repo, saved)
     assert result.status == "fetch failed"
     assert "secret" not in result.error and "second line" not in result.error
-    assert saved == previous
+    assert saved["repos"][clone.repo.key]["tip"] == previous["repos"][clone.repo.key]["tip"]
+    assert saved["repos"][clone.repo.key]["complete"] is False
     assert exit_code([result]) == 2
     assert check_repo(other.repo, saved).status == "baseline recorded"
 
@@ -353,7 +354,7 @@ def test_fetch_and_halfway_failure_isolation(clone, factory, saved, monkeypatch)
     result = check_repo(clone.repo, saved)
     assert result.status == "check failed"
     assert saved == previous
-    assert exit_code([result]) == 1
+    assert exit_code([result]) == 10
 
 
 def test_actual_unreachable_remote_is_fetch_failure(clone, saved):
@@ -361,7 +362,7 @@ def test_actual_unreachable_remote_is_fetch_failure(clone, saved):
     result = check_repo(clone.repo, saved)
     assert result.status == "fetch failed"
     assert exit_code([result]) == 2
-    assert not saved["repos"]
+    assert saved["repos"][clone.repo.key]["complete"] is False
 
 
 def test_fetch_timeout_is_fetch_failure(clone, saved, monkeypatch):
@@ -371,7 +372,7 @@ def test_fetch_timeout_is_fetch_failure(clone, saved, monkeypatch):
     monkeypatch.setattr(gitutil, "run", timeout)
     result = check_repo(clone.repo, saved)
     assert result.status == "fetch failed"
-    assert not saved["repos"]
+    assert saved["repos"][clone.repo.key]["complete"] is False
 
 
 def test_all_install_and_ownership_families_in_diff(clone, saved):

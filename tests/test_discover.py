@@ -67,7 +67,7 @@ def test_walk_depth_symlinks_and_exclude(factory, tmp_path):
     assert hidden.path not in [r.path for r in discover(config)]
     assert vendor.path not in [r.path for r in discover(config)]
     config.roots = [str(root / "linked")]
-    assert discover(config) == []
+    assert discover(config)[0].reason == "symlink"
 
 
 def test_from_extra_and_bare(clone, tmp_path):
@@ -75,9 +75,11 @@ def test_from_extra_and_bare(clone, tmp_path):
     source.write_text(f"# examples\n{clone.path}\n{clone.upstream} # bare\n")
     result = discover(Config(roots=["/nonexistent"], repos=["/also-nonexistent"]), source=source)
     assert result[0].full_name == "acme/widget"
-    assert result[1].reason == "bare"
-    assert discover(Config(roots=[str(clone.upstream)]))[0].reason == "bare"
-    assert discover(Config(roots=[], repos=[str(tmp_path / "missing")]))[0].reason == "no-remote"
+    assert result[1].reason == "not-a-repo-root"
+    assert discover(Config(roots=[str(clone.upstream)]))[0].reason == "not-a-repo-root"
+    assert (
+        discover(Config(roots=[], repos=[str(tmp_path / "missing")]))[0].reason == "not-a-repo-root"
+    )
 
 
 def test_worktree_and_submodule(clone, factory, tmp_path):
@@ -136,4 +138,4 @@ def test_explicit_symlink_excluded(clone, tmp_path):
     link.symlink_to(clone.path, target_is_directory=True)
     config = clone.config()
     config.repos = [str(link)]
-    assert discover(config)[0].reason == "excluded"
+    assert discover(config)[0].reason == "symlink"

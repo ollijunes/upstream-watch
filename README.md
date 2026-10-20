@@ -57,7 +57,9 @@ config goes to `~/.config/upstream-watch/config.toml`.
 
 `list` prints every clone it found with the reason it is watched or
 skipped: `own`, `not-github`, `excluded`, `no-remote`, `worktree-duplicate`,
-`not-public` or `bare`. You can also pass a file of paths with `--from`
+`not-public`, `not-a-repo-root`, `symlink` or `invalid-remote-name`. A path
+must be the top level of a clone, not a folder inside one, and no part of
+the path may be a symlink. You can also pass a file of paths with `--from`
 instead of searching.
 
 ## Check
@@ -69,20 +71,32 @@ upstream-watch check
 The first check records a baseline for each repository and flags nothing
 except an archived or transferred repository. Later checks compare with the
 baseline and print one line per repository, then the path of the report.
-Reports go to `~/.local/state/upstream-watch/reports/`. Use `--stdout` to
-print the report instead, or `--report PATH` to choose the file.
+Reports go to `~/.local/state/upstream-watch/reports/`, one file per run,
+never overwritten. Use `--stdout` to print the report instead, or
+`--report PATH` to choose the file. Only one check or update runs at a
+time; a second one says so and exits.
 
 The report starts with a table and the flags, then one section per
 repository with releases, tags, a changelog grouped by commit type, and the
 state of your local branch. [examples/report.md](examples/report.md) shows
 one from the test fixtures.
 
-A check never runs `pull`, `merge` or `checkout`. It runs `git fetch` with
-`--prune --tags` against the watched remote and reads the result.
+A check runs `git fetch` with explicit refspecs: branches go to the usual
+`refs/remotes/<remote>/`, tags go to a namespace owned by the tool, so your
+local tags and branches are never written, whatever your clone's fetch
+configuration says. Git hooks, `fsmonitor` and automatic maintenance are
+turned off for every command the tool runs. A check never runs `pull`,
+`merge` or `checkout`; the one exception is `check --update-allowed`,
+described below.
 
-The exit code tells a script what it found: 0 nothing flagged, 10 at least
-one `review` flag, 20 at least one `high` flag, 2 when every repository
-failed to fetch, 1 on a configuration or check error.
+Flags stay pending until your clone has caught up with the remote or an
+update succeeds. A force-push you have not acted on is still in the next
+report and still blocks `update`.
+
+The exit code tells a script what it found, in this order: 2 when every
+repository failed to fetch, 20 when a `high` flag is pending, 10 when a
+`review` flag is pending, 1 when a check or an update failed, 0 otherwise.
+`info` flags do not change the exit code.
 
 ## Flags
 
@@ -110,13 +124,16 @@ upstream-watch update            # asks per repository
 upstream-watch update ~/src/tool --dry-run
 ```
 
-`update` fast-forwards a repository with `git pull --ff-only` after you
-answer `y`. It refuses when any of these is true: no check in the last 24
-hours, the remote moved since the check, the clone is not on the branch that
-tracks the watched default branch, the working tree or index is not clean,
-a merge, rebase, cherry-pick or bisect is in progress, the local branch is
-ahead, or the last check had a `high` flag. It never falls back to a merge
-or a rebase.
+`update` fast-forwards a repository to the exact commit the last check
+looked at, with `git merge --ff-only <commit>`. It does not fetch again, so
+nothing you have not seen in a report can come in. It refuses when any of
+these is true: no check in the last 24 hours, the remote moved since the
+check, the clone is not on the branch that tracks the watched default
+branch, the working tree or index is not clean, a merge, rebase,
+cherry-pick or bisect is in progress, the local branch is ahead, a `high`
+flag is pending, or the last check could not analyse the whole range. Every
+condition is checked again right before the merge, also with `--yes`. It
+never falls back to a merge commit or a rebase.
 
 Without a terminal nothing is updated unless you pass `--yes`. Repositories
 listed in `auto_update` in the config are updated without asking, also by a
@@ -161,7 +178,8 @@ The GitHub API is used for repository metadata, releases and tag
 verification. Without a token the tool makes at most two calls per
 repository per run and stops calling the API for the rest of the run when
 the rate limit is reached; git-based checks continue. A token comes from
-`GITHUB_TOKEN` or from `gh auth token` and is never printed or written.
+`GITHUB_TOKEN` or from `gh auth token --hostname github.com`, is sent to
+`https://api.github.com` only, and is never printed or written.
 
 ## How it compares
 
@@ -200,7 +218,10 @@ you run with your own credentials or code you build from source.
 - A changed `package.json` is flagged only when its lifecycle scripts
   change. Other manifests are flagged on any change.
 - The changelog shows up to 30 non-merge subjects and 10 merge subjects per
-  check.
+  check. Very large diffs and tag lists are cut, and the report then says
+  the analysis was incomplete; such a repository is not auto-updated.
+- The download-to-shell check is text matching on added lines. It misses
+  constructions it does not know and can match an example in a README.
 - The scheduled install is launchd only. Linux users install the printed
   systemd units by hand.
 

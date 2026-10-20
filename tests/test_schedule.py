@@ -86,6 +86,14 @@ def test_install_uninstall_mocked(tmp_path, monkeypatch, capsys):
     ]
     path = tmp_path / f"Library/LaunchAgents/{LABEL}.plist"
     assert path.stat().st_mode & 0o777 == 0o600
+    with pytest.raises(WatchError, match="bootout"):
+        schedule("uninstall", tmp_path, config)
+    assert path.exists()
+    monkeypatch.setattr(
+        subprocess,
+        "run",
+        lambda argv, **kwargs: subprocess.CompletedProcess(argv, 1 if "print" in argv else 0),
+    )
     assert schedule("uninstall", tmp_path, config) == 0
     assert not path.exists()
     assert schedule("print", tmp_path, config, platform="systemd") == 0

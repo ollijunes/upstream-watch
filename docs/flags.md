@@ -9,6 +9,10 @@ Severities:
 - `high`: history or a tag was rewritten, or the repository changed hands.
   `update` refuses these until you pass `--ignore-flags`, and `auto_update`
   skips them by default.
+
+Flags stay pending across checks until your clone has caught up with the
+remote or an update succeeds. The report shows the date a pending flag was
+first seen.
 - `review`: something changed that deserves a look at the diff.
 - `info`: a fact about the clone or the repository that limits the analysis.
 
@@ -19,18 +23,21 @@ Severities:
 How: the tip recorded at the last check is no longer an ancestor of the new
 tip (`git merge-base --is-ancestor`).
 
-Why it matters: commits you had were replaced. A rewritten default branch
-is rare in healthy projects and common in takeovers and mistakes.
+Why it matters: commits the remote had were replaced. A rewritten default
+branch is rare in healthy projects and common in takeovers and mistakes.
 
 What to do: compare the old and new history before you pull. `git log
-<old>..<new>` and `git log <new>..<old>` in the clone show both sides. A
-fast-forward pull is impossible anyway; decide whether to reset to the new
-branch or keep your copy.
+<old>..<new>` and `git log <new>..<old>` in the clone show both sides. If
+your local branch is older than the rewritten part, a fast-forward is still
+possible, which is exactly why the flag stays pending until you act on it.
 
-### Tag moved
+### Tag moved or recreated
 
 How: a tag name seen at an earlier check now points at a different object
-in `git ls-remote --tags`.
+in `git ls-remote --tags`, or a tag that had disappeared comes back at a
+different object. A tag recreated at the same object is not flagged. The
+comparison is on the tag object; for an annotated tag that is the tag
+itself, so a re-signed tag on the same commit also counts as moved.
 
 Why it matters: release tags are supposed to be immutable. A moved tag
 means a build from "v2.1.0" today is not the build from "v2.1.0" last
@@ -103,7 +110,7 @@ tip: `install*`, `setup.sh`, `bootstrap*`, `get*.sh`, shell scripts at the
 repository root, `Makefile`, `*.mk`, `CMakeLists.txt`, `configure*`,
 `setup.py`, `setup.cfg`, `pyproject.toml`, `build.rs`, `Cargo.toml`,
 `.npmrc`, `binding.gyp`, `Gemfile`, `*.gemspec`, `.github/workflows/`,
-`.github/actions/`, `action.yml`, `Dockerfile*`, `.pre-commit-hooks.yaml`,
+`.github/actions/`, `action.yml`, `action.yaml`, `Dockerfile*`, `.pre-commit-hooks.yaml`,
 `.gitattributes`, `.gitmodules`, `.husky/`, `.envrc`, `flake.nix`, `*.ps1`,
 `Brewfile`, `Formula/*.rb`. For `package.json` only the `preinstall`,
 `install`, `postinstall`, `prepare` and `prepublish` scripts count.
@@ -117,10 +124,22 @@ What to do: read the diff of the named files before you build or install.
 
 How: `git diff --summary` shows a new file with mode 100755 or a mode
 change to it; `git diff --numstat` shows a new binary file; or an added
-line matches `curl ... | sh`, `wget ... | bash` or `iwr ... | iex`.
+line matches a known download-to-shell form: `curl … | sh`, `wget … |
+bash`, `… | sudo bash`, `bash <(curl …)`, `sh -c "$(curl …)"` or `iwr … |
+iex`. Comment lines are skipped. This is text matching: it misses forms it
+does not know and can match an example in documentation.
 
 What to do: open the file. A new binary in a source repository and a
 one-line installer are both worth a question in the project's issues.
+
+### Analysis incomplete
+
+How: the previous tip is no longer in the clone, the tag list or the diff
+was larger than the tool reads, or the tag namespace could not be fetched.
+
+What to do: the report shows what was checked. Run `git fetch --unshallow`
+or look at the repository on GitHub. Repositories with an incomplete check
+are never updated automatically.
 
 ## info
 

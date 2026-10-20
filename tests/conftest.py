@@ -1,6 +1,7 @@
 import ipaddress
 import json
 import os
+import socket
 import subprocess
 import sys
 import threading
@@ -21,8 +22,39 @@ def git(path, *args, check=True):
     ).stdout.strip()
 
 
+@pytest.fixture(scope="session", autouse=True)
+def loopback_only():
+    original_connect = socket.socket.connect
+    original_create = socket.create_connection
+
+    def allowed(address):
+        host = address[0]
+        if host == "localhost":
+            return
+        try:
+            if ipaddress.ip_address(host).is_loopback:
+                return
+        except ValueError:
+            pass
+        raise OSError(f"Test blocked non-loopback connection: {host}")
+
+    def connect(sock, address):
+        allowed(address)
+        return original_connect(sock, address)
+
+    def create(address, *args, **kwargs):
+        allowed(address)
+        return original_create(address, *args, **kwargs)
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(socket.socket, "connect", connect)
+        patch.setattr(socket, "create_connection", create)
+        yield
+
+
 @pytest.fixture(autouse=True)
 def isolated(tmp_path, monkeypatch):
+    tmp_path = tmp_path.resolve()
     home = tmp_path / "home"
     home.mkdir()
     config = tmp_path / "gitconfig"
@@ -103,6 +135,7 @@ class Clone:
 @pytest.fixture
 def factory(tmp_path, isolated):
     _, store = isolated
+    tmp_path = tmp_path.resolve()
     counter = 0
 
     def make(full_name="acme/widget", *, parent=None, shallow=False):
@@ -117,7 +150,7 @@ def factory(tmp_path, isolated):
         git(source, "add", ".")
         git(source, "commit", "-m", "initial")
         git(source, "push", "origin", "main")
-        target = (parent or tmp_path) / f"clone-{counter}"
+        target = (parent.resolve() if parent else tmp_path) / f"clone-{counter}"
         target.parent.mkdir(parents=True, exist_ok=True)
         git(tmp_path, "clone", *(["--depth=1"] if shallow else []), bare.as_uri(), str(target))
         git(target, "remote", "set-url", "origin", f"https://github.com/{full_name}.git")

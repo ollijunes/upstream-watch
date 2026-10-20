@@ -28,7 +28,8 @@ def test_success_uses_ff_only(clone, checked, monkeypatch):
 
     monkeypatch.setattr(gitutil, "run", record)
     assert update_repo(clone.repo, checked, clone.config(), yes=True) == "updated"
-    assert ("pull", "--ff-only", "origin", "main") in calls
+    assert ("merge", "--ff-only", "--no-autostash", "--", checked["tip"]) in calls
+    assert not any(args[0] in {"fetch", "pull"} for args in calls)
     assert (clone.path / "file.txt").read_text() == "change\n"
 
 
@@ -82,7 +83,7 @@ def test_refusals(clone, checked, change, expected):
     elif change == "tip":
         checked["tip"] = "b" * 40
     elif change == "high":
-        checked["flags"] = [{"severity": "high", "reason": "force-push"}]
+        checked["pending_flags"] = [{"severity": "high", "reason": "force-push"}]
     before = git(clone.path, "rev-parse", "HEAD")
     assert expected in update_repo(clone.repo, checked, clone.config(), yes=True)
     assert git(clone.path, "rev-parse", "HEAD") == before
@@ -103,7 +104,7 @@ def test_untracked_opt_in_and_dry_run(clone, checked):
 
 
 def test_ignore_high_still_prints(clone, checked, capsys):
-    checked["flags"] = [{"severity": "high", "reason": "force-push"}]
+    checked["pending_flags"] = [{"severity": "high", "reason": "force-push"}]
     assert (
         update_repo(clone.repo, checked, clone.config(), yes=True, ignore_flags=True) == "updated"
     )
@@ -144,14 +145,14 @@ def test_auto_update(clone, checked, by_path):
 
 def test_auto_block_and_only(clone, checked):
     assert update_repo(clone.repo, checked, clone.config(), auto_only=True) == "not auto-approved"
-    checked["flags"] = [{"severity": "review", "reason": "new identity"}]
+    checked["pending_flags"] = [{"severity": "review", "reason": "new identity"}]
     config = clone.config(auto_update=["acme/widget"], auto_update_blocked_by=["review"])
     assert "blocked by flags" in update_repo(clone.repo, checked, config)
     assert refusal(clone.repo, None) == ("no successful check", 0)
 
 
 def test_divergent_pull_failure_untouched(clone, checked):
-    # Remote changes between check and pull: ff-only must still reject divergence.
+    # A rewritten upstream must be refused without fetching or changing HEAD.
     git(clone.source, "checkout", "--orphan", "replacement")
     git(clone.source, "add", ".")
     git(clone.source, "commit", "-m", "unrelated root")
@@ -159,7 +160,7 @@ def test_divergent_pull_failure_untouched(clone, checked):
     before = git(clone.path, "rev-parse", "HEAD")
     content = (clone.path / "file.txt").read_text()
     result = update_repo(clone.repo, checked, clone.config(), yes=True)
-    assert result.startswith("update failed:")
+    assert "remote tip changed since check; run check again" in result
     assert git(clone.path, "rev-parse", "HEAD") == before
     assert (clone.path / "file.txt").read_text() == content
 

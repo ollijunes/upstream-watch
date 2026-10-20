@@ -52,13 +52,24 @@ BUILD = (
     "Brewfile",
 )
 HOOKS = {"preinstall", "install", "postinstall", "prepare", "prepublish"}
-PIPE = re.compile(r"\b(?:curl|wget)\b.*\|\s*(?:(?:/\w+)+/)?(?:sh|bash)\b|\biwr\b.*\|\s*iex\b", re.I)
+PIPE = re.compile(
+    r"\b(?:curl|wget)\b.*\|\s*(?:sudo\s+(?:-E\s+)?)?(?:(?:/\w+)+/)?(?:sh|bash)\b"
+    r"|\b(?:sh|bash)\s+(?:<\(\s*(?:curl|wget)\b|-c\s+[\"']?\$\(\s*(?:curl|wget)\b)"
+    r"|\biwr\b.*\|\s*iex\b",
+    re.I,
+)
+DIFF_LIMIT = 2 * 1024 * 1024
+
+
+def download_to_shell(line: str) -> bool:
+    return not line.lstrip().startswith("#") and bool(PIPE.search(line))
 
 
 @dataclass
 class Flag:
     severity: str
     reason: str
+    first_seen: str = ""
 
     def as_dict(self):
         return asdict(self)
@@ -100,7 +111,9 @@ def package_changed(path, old: str, new: str, name: str) -> bool:
 
 
 def file_flags(path, old: str, new: str) -> tuple[list[Flag], set[str]]:
-    names = git.run(path, "diff", "--name-only", "-z", old, new, "--").stdout.split("\0")
+    names = git.run(path, "diff", "--no-renames", "--name-only", "-z", old, new, "--").stdout.split(
+        "\0"
+    )
     names = [name for name in names if name]
     numstat = git.run(path, "diff", "--numstat", "-z", "--no-renames", old, new, "--").stdout
     binary = {row.split("\t", 2)[2] for row in numstat.split("\0") if row.startswith("-\t-\t")}
@@ -114,22 +127,36 @@ def file_flags(path, old: str, new: str) -> tuple[list[Flag], set[str]]:
         ):
             flags.append(Flag("review", f"install, build or CI files changed: {name}"))
             sensitive.add(name)
-    summary = git.text(path, "diff", "--summary", old, new, "--")
+    summary = git.text(path, "diff", "--no-renames", "--summary", old, new, "--")
     if re.search(r"(?:create mode 100755|mode change \d+ => 100755)", summary):
         flags.append(Flag("review", "new executable files or executable mode changes"))
     added = set(
-        git.run(path, "diff", "--diff-filter=A", "--name-only", "-z", old, new).stdout.split("\0")
+        git.run(
+            path, "diff", "--no-renames", "--diff-filter=A", "--name-only", "-z", old, new, "--"
+        ).stdout.split("\0")
     )
     if binary & added:
         flags.append(Flag("review", "new binary files"))
     textual = [name for name in names if name not in binary]
     if textual:
         diff = git.run(
-            path, "diff", "--no-ext-diff", "--no-textconv", "--unified=0", old, new, "--", *textual
-        ).stdout
+            path,
+            "diff",
+            "--no-renames",
+            "--no-ext-diff",
+            "--no-textconv",
+            "--unified=0",
+            old,
+            new,
+            "--",
+            *textual,
+            max_bytes=DIFF_LIMIT,
+        )
+        if diff.truncated:
+            flags.append(Flag("review", "analysis incomplete: diff truncated"))
         if any(
-            PIPE.search(line[1:])
-            for line in diff.splitlines()
+            download_to_shell(line[1:])
+            for line in diff.stdout.splitlines()
             if line.startswith("+") and not line.startswith("+++")
         ):
             flags.append(Flag("review", "added line pipes a download to a shell"))
@@ -149,6 +176,7 @@ def maintainer_flags(path, revision: str, known: set[str], sensitive: set[str]) 
                 git.run(
                     path,
                     "diff-tree",
+                    "--no-renames",
                     "--root",
                     "-m",
                     "--no-commit-id",

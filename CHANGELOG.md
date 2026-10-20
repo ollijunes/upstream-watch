@@ -13,9 +13,15 @@
   maintainer signal, ownership file changes, install, build and CI file
   changes, new executables and binaries, and download-to-shell lines as
   `review`; archived, fork, shallow clone and detached HEAD as `info`.
-- `update` fast-forwards with `git pull --ff-only` after approval, with
-  refusal conditions for dirty, ahead, detached, in-progress and stale
-  clones and for `high` flags; `auto_update` with `auto_update_blocked_by`.
+- `update` fast-forwards to the exact commit of the last check with
+  `git merge --ff-only`, without a second fetch, after approval; refusal
+  conditions for dirty, ahead, detached, in-progress and stale clones, for
+  pending `high` flags and for incomplete checks; `auto_update` with
+  `auto_update_blocked_by`.
+- Flags stay pending until the clone has caught up or an update succeeds.
+- Every git command runs with hooks, maintenance and auto-stash off, with
+  explicit fetch refspecs and a tool-owned tag namespace, and with
+  repository-selecting `GIT_*` variables removed.
 - GitHub API with ETags, a rate-limit stop and token redaction; git-only
   mode without the API.
 - `schedule` for launchd, with printed systemd units and templates in

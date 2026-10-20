@@ -76,7 +76,7 @@ def test_network_failure_and_invalid_response(fake_api, monkeypatch):
         def __exit__(self, *args):
             pass
 
-        def read(self):
+        def read(self, limit):
             return b"not json"
 
     monkeypatch.setattr(api.opener, "open", lambda *a, **k: BadResponse())

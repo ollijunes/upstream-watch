@@ -19,7 +19,7 @@ def scheduler_path(home: Path, platform: str) -> str:
     for program in ("git", "gh"):
         binary = shutil.which(program)
         if binary:
-            directories.append(str(Path(binary).resolve().parent))
+            directories.append(str(Path(binary).parent))
     directories.append(str(home / ".local/bin"))
     defaults = (
         "/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
@@ -59,7 +59,7 @@ def render(
         "-m",
         "upstream_watch",
         "--config",
-        str(config),
+        str(config.expanduser().absolute()),
         "check",
     ]
     if update_allowed:
@@ -136,7 +136,10 @@ def schedule(
             ["launchctl", "bootstrap", domain, str(path)],
         ]
         if installing
-        else [["launchctl", "bootout", domain, str(path)]]
+        else [
+            ["launchctl", "print", f"{domain}/{LABEL}"],
+            ["launchctl", "bootout", domain, str(path)],
+        ]
     )
     if dry_run:
         print(f"{'write' if installing else 'remove'} {path}")
@@ -148,7 +151,9 @@ def schedule(
         private_dir(home / "Library/Logs/upstream-watch")
     for command in commands:
         result = subprocess.run(command, capture_output=True, check=False)  # noqa: S603
-        if result.returncode and "bootout" not in command:
+        if not installing and "print" in command and result.returncode:
+            break
+        if result.returncode and (not installing or "bootout" not in command):
             raise WatchError(f"Scheduler command failed: {command[0]} {command[1]}")
     if not installing:
         path.unlink(missing_ok=True)

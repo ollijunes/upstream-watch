@@ -44,7 +44,8 @@ def candidates(config: Config, source: Path | None = None):
                 yield expand(value)
         return
     for root in map(expand, config.roots):
-        if root.is_symlink():
+        if root.resolve() != root.expanduser().absolute():
+            yield root
             continue
         for directory, dirs, files in os.walk(root, followlinks=False):
             path = Path(directory)
@@ -74,13 +75,10 @@ def discover(config: Config, api: GitHub | None = None, source: Path | None = No
         if any(fnmatch.fnmatch(str(path), str(expand(p))) for p in config.exclude):
             repo.reason = "excluded"
             continue
-        if path.is_symlink():
-            repo.reason = "excluded"
+        if path.resolve() != path.expanduser().absolute():
+            repo.reason = "symlink"
             continue
         try:
-            if git.text(path, "rev-parse", "--is-bare-repository") == "true":
-                repo.reason = "bare"
-                continue
             if git.text(path, "rev-parse", "--show-superproject-working-tree"):
                 repo.reason = "worktree-duplicate"
                 continue
@@ -94,6 +92,8 @@ def discover(config: Config, api: GitHub | None = None, source: Path | None = No
             if not remotes:
                 repo.reason = "no-remote"
                 continue
+            for remote in remotes:
+                git.validate(path, remote, "remote")
             pairs = [(r, parse_remote(git.text(path, "remote", "get-url", r))) for r in remotes]
             github = [(r, n) for r, n in pairs if n]
             external = [(r, n) for r, n in github if n.split("/")[0].lower() not in own]
@@ -108,6 +108,8 @@ def discover(config: Config, api: GitHub | None = None, source: Path | None = No
                 repo.metadata = api.metadata(repo.full_name)
         except NotPublic:
             repo.reason = "not-public"
-        except git.GitError:
-            repo.reason = "no-remote"
+        except git.GitError as exc:
+            repo.reason = (
+                str(exc) if str(exc) in {"not-a-repo-root", "invalid-remote-name"} else "no-remote"
+            )
     return results

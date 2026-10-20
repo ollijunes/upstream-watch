@@ -1,24 +1,28 @@
 """Command-line entry point."""
 
 import argparse
+import http.client
+import os
 import shutil
 import subprocess
 import sys
+from contextlib import nullcontext, redirect_stderr, redirect_stdout
 from datetime import UTC, datetime
 from pathlib import Path
 
 from . import __version__, report, state
-from .check import check_repo, exit_code
+from .check import Result, check_repo, exit_code
 from .config import Config, WatchError, config_path, dump, expand, load, state_path, write_private
-from .discover import Repo, discover
+from .discover import discover
+from .flags import Flag
 from .github import GitHub, runtime_token
-from .gitutil import clean, redact
+from .gitutil import clean, redact, scrub
 from .schedule import schedule
 from .update import update_repo
 
 EXIT_HELP = (
-    "Exit codes: 0 no review/high flags; 10 review; 20 high; "
-    "1 configuration/usage/check error; 2 every repository failed to fetch."
+    "Exit codes: in precedence order, 2 every repository failed to fetch; "
+    "20 pending high; 10 pending review; 1 configuration/usage/check/update error; else 0."
 )
 
 
@@ -79,7 +83,12 @@ def initialize(args, path: Path) -> int:
     return 0
 
 
-def execute(args) -> int:
+def execute(args, token=None) -> int:
+    with state.lock() if args.command in {"check", "update"} else nullcontext():
+        return _execute(args, token)
+
+
+def _execute(args, token) -> int:
     cfg_path = args.config or config_path()
     if args.command == "init":
         return initialize(args, cfg_path)
@@ -97,41 +106,54 @@ def execute(args) -> int:
     config = load(cfg_path)
     saved_path = state_path()
     saved = state.load(saved_path)
+    client = GitHub(saved["api"], token=token)
     if args.command == "update":
+        if any(path.resolve() != path.expanduser().absolute() for path in args.paths):
+            raise WatchError("symlink")
         wanted = {path.resolve() for path in args.paths}
         found = set()
-        failed = False
+        results = []
+        current = {repo.key: repo for repo in discover(config) if not repo.reason}
         for key, snapshot in saved["repos"].items():
-            path = Path(snapshot["path"])
-            if wanted and path.resolve() not in wanted:
+            if key not in current:
                 continue
-            found.add(path.resolve())
+            repo = current[key]
+            if wanted and repo.path.resolve() not in wanted:
+                continue
+            found.add(repo.path.resolve())
+            result = Result(repo)
             if key in saved.get("failed_checks", []):
-                print(f"{clean(snapshot['full_name'])}: skipped: last check failed")
-                continue
-            repo = Repo(path, snapshot["remote"], snapshot["full_name"], key.rsplit("::", 1)[0])
-            outcome = update_repo(
-                repo,
-                snapshot,
-                config,
-                yes=args.yes,
-                dry_run=args.dry_run,
-                allow_untracked=args.allow_untracked,
-                ignore_flags=args.ignore_flags,
-            )
+                outcome = "skipped: last check failed"
+                result.error = "last check failed"
+            else:
+                outcome = update_repo(
+                    repo,
+                    snapshot,
+                    config,
+                    yes=args.yes,
+                    dry_run=args.dry_run,
+                    allow_untracked=args.allow_untracked,
+                    ignore_flags=args.ignore_flags,
+                )
+            result.update = outcome
+            result.pending = [
+                Flag(**f) for f in snapshot.get("pending_flags", snapshot.get("flags", []))
+            ]
+            results.append(result)
             print(f"{clean(repo.full_name)}: {outcome}")
-            failed |= outcome.startswith("update failed")
+        state.save(saved_path, scrub(saved, token))
         if wanted - found:
-            raise WatchError("Requested path has no successful check")
-        return 1 if failed else 0
-    api = GitHub(saved["api"], token=runtime_token()) if config.github_api else None
+            raise WatchError("Requested path has no successful check in current discovery")
+        return exit_code(results)
+    api = client if config.github_api else None
     repos = discover(config, api, args.source)
     if args.command == "list":
         for repo in repos:
             status = repo.reason or f"watch {repo.full_name} ({repo.remote})"
             print(f"{clean(report.display_path(repo.path))}: {clean(status)}")
-        state.save(saved_path, saved)
+        state.save(saved_path, scrub(saved, token))
         return 0
+    state.expire(saved, {r.key for r in repos if not r.reason}, datetime.now(UTC))
     results = [check_repo(repo, saved, api) for repo in repos if not repo.reason]
     failed = set(saved.get("failed_checks", []))
     for result in results:
@@ -140,7 +162,7 @@ def execute(args) -> int:
         else:
             failed.discard(result.repo.key)
     saved["failed_checks"] = sorted(failed)
-    state.save(saved_path, saved)
+    state.save(saved_path, scrub(saved, token))
     if args.update_allowed:
         for result in results:
             if not result.error:
@@ -151,9 +173,13 @@ def execute(args) -> int:
                     auto_only=True,
                     show_flags=False,
                 )
+                result.pending = [
+                    Flag(**flag)
+                    for flag in saved["repos"][result.repo.key].get("pending_flags", [])
+                ]
+    state.save(saved_path, scrub(saved, token))
     content = report.render(results, api.messages if api else [])
-    if api:
-        content = api.sanitize(content)
+    content = redact(redact(content, token), report.escape(token) if token else None)
     if args.stdout:
         print(content, end="")
     else:
@@ -164,19 +190,43 @@ def execute(args) -> int:
                 f"{result.highest}; {result.status}"
             )
         destination = args.report or saved_path.parent / "reports" / (
-            datetime.now(UTC).strftime("%Y-%m-%d-%H%M") + ".md"
+            datetime.now(UTC).strftime("%Y-%m-%d-%H%M%S") + ".md"
         )
-        write_private(expand(str(destination)), content.encode())
+        destination = state.write_report(expand(str(destination)), content.encode())
         print(f"Report: {report.display_path(destination)}")
+    for result in results:
+        if result.update.startswith("update failed:"):
+            print(f"{clean(result.repo.full_name)}: {result.update}")
     return exit_code(results)
 
 
+class RedactingWriter:
+    def __init__(self, stream, token):
+        self.stream = stream
+        self.token = token
+
+    def write(self, value):
+        return self.stream.write(redact(value, self.token))
+
+    def flush(self):
+        self.stream.flush()
+
+
 def main(argv=None) -> int:
+    token = os.environ.get("GITHUB_TOKEN")
     try:
-        args = parser().parse_args(argv)
-        return execute(args)
+        token = runtime_token() or token
+        with (
+            redirect_stdout(RedactingWriter(sys.stdout, token)),
+            redirect_stderr(RedactingWriter(sys.stderr, token)),
+        ):
+            args = parser().parse_args(argv)
+            return execute(args, token)
+    except state.Busy as exc:
+        print(str(exc))
+        return 0
     except SystemExit as exc:
         return 0 if exc.code == 0 else 1
-    except (WatchError, OSError, ValueError) as exc:
-        print(f"upstream-watch: {clean(redact(str(exc)))}", file=sys.stderr)
+    except (WatchError, OSError, ValueError, http.client.HTTPException) as exc:
+        print(f"upstream-watch: {clean(redact(str(exc), token))}", file=sys.stderr)
         return 1

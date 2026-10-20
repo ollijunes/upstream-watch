@@ -1,5 +1,6 @@
 import json
 import subprocess
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -37,7 +38,7 @@ def golden_results(factory, saved, fake_api):
         ],
         {},
     )
-    changed = check_repo(widget.repo, saved, api)
+    changed = check_repo(widget.repo, saved, api, now=datetime(2026, 1, 2, tzinfo=UTC))
     unchanged = check_repo(tool.repo, saved)
     changed.repo.path = Path.home() / "src/widget"
     unchanged.repo.path = Path.home() / "src/tool"
@@ -48,7 +49,7 @@ def test_golden(factory, saved, fake_api):
     results = golden_results(factory, saved, fake_api)
     content = report.render(results)
     assert content == (Path(__file__).parents[1] / "examples/report.md").read_text()
-    assert "Unchanged: example\\-org/tool" in content
+    assert "Unchanged: example-org/tool" in content
 
 
 def test_report_errors_flags_and_exit(clone, saved):
@@ -78,7 +79,7 @@ def test_cli_init_list_check_report_and_update(clone, capsys, tmp_path):
     clone.commit("install.sh", "echo install\n", "build: install")
     assert cli.main(["check", "--stdout"]) == 10
     assert "install, build or CI" in capsys.readouterr().out
-    assert cli.main(["update", str(clone.path), "--dry-run"]) == 0
+    assert cli.main(["update", str(clone.path), "--dry-run"]) == 10
     assert "dry-run:" in capsys.readouterr().out
     assert cli.main(["update", str(clone.path), "--yes"]) == 0
     assert (clone.path / "install.sh").exists()
@@ -89,7 +90,7 @@ def test_cli_init_list_check_report_and_update(clone, capsys, tmp_path):
 
 def test_cli_auto_and_api(clone, fake_api, capsys, monkeypatch):
     routes, requests, base = fake_api
-    monkeypatch.setenv("UPSTREAM_WATCH_API_URL", base)
+    monkeypatch.setattr(cli, "GitHub", lambda cache, **kwargs: GitHub(cache, base=base, **kwargs))
     routes["/repos/acme/widget"] = (200, {"full_name": "acme/widget", "default_branch": "main"}, {})
     routes["/repos/acme/widget/releases?per_page=10"] = (200, [], {})
     config = clone.config(auto_update=["acme/widget"])
@@ -137,6 +138,8 @@ def test_git_subprocess_safety_and_failures(tmp_path, monkeypatch):
 
     def run(argv, **kwargs):
         seen.append(kwargs)
+        if "--show-toplevel" in argv:
+            return subprocess.CompletedProcess(argv, 0, str(tmp_path), "")
         return subprocess.CompletedProcess(argv, 1, "", "")
 
     monkeypatch.setattr(subprocess, "run", run)
@@ -193,7 +196,7 @@ def test_token_echoed_by_git_is_not_persisted_or_reported(clone, saved, fake_api
     assert token not in report.render([result]) + json.dumps(saved)
 
 
-def test_failed_check_blocks_update_without_replacing_snapshot(clone, capsys):
+def test_moved_tag_blocks_update_with_pending_high(clone, capsys):
     write_private(config_path(), dump(clone.config()))
     clone.tag("v1")
     assert cli.main(["check", "--stdout"]) == 0
@@ -201,10 +204,10 @@ def test_failed_check_blocks_update_without_replacing_snapshot(clone, capsys):
     clone.commit()
     git(clone.source, "tag", "-f", "v1")
     git(clone.source, "push", "--force", "origin", "refs/tags/v1")
-    assert cli.main(["check", "--stdout"]) == 2
-    assert state.load(state_path())["repos"] == previous
-    assert cli.main(["update", "--yes"]) == 0
-    assert "last check failed" in capsys.readouterr().out
+    assert cli.main(["check", "--stdout"]) == 20
+    assert state.load(state_path())["repos"] != previous
+    assert cli.main(["update", "--yes"]) == 20
+    assert "high flag" in capsys.readouterr().out
 
 
 def test_module_entry_point(monkeypatch, capsys):
@@ -223,8 +226,9 @@ def test_stdout_stays_markdown_during_auto_update(clone, capsys):
     assert cli.main(["check", "--stdout"]) == 0
     capsys.readouterr()
     clone.commit("install.sh", "echo install\n", "build: installer")
-    assert cli.main(["check", "--stdout", "--update-allowed"]) == 10
+    assert cli.main(["check", "--stdout", "--update-allowed"]) == 0
     output = capsys.readouterr().out
     assert output.startswith("# Upstream watch\n")
-    assert "| updated |" in output
+    assert "| none | updated |" in output
+    assert state.load(state_path())["repos"][clone.repo.key]["pending_flags"] == []
     assert "**review**" in output

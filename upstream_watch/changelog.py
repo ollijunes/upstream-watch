@@ -7,8 +7,21 @@ from . import gitutil as git
 
 def escape(value: str) -> str:
     text = git.clean(value)
-    text = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-    return re.sub(r"([\\`*_{}\[\]()#+.!|~-])", r"\\\1", text)
+    text = re.sub(r"([\\`*_\[\]<>|])", r"\\\1", text)
+    text = re.sub(r"^(#|-|\+)", lambda m: "\\" + m[0], text)
+    return re.sub(r"^(\d+)\.", r"\1\\.", text)
+
+
+def cut(value: str, limit: int) -> str:
+    return value[:limit] + "…" if len(value) > limit else value
+
+
+def release_body(value: str) -> str:
+    lines = value.splitlines()
+    body = "\n".join(cut(line, 300) for line in lines[:20])
+    if len(lines) > 20:
+        body += "…"
+    return cut(body, 4000)
 
 
 def summarize(path, revision: str) -> dict:
@@ -24,12 +37,12 @@ def summarize(path, revision: str) -> dict:
             group = "chore"
         entries = groups.setdefault(group, [])
         if len(entries) < 10:
-            entries.append(escape(subject))
+            entries.append(escape(cut(subject, 200)))
     merges = int(git.text(path, "rev-list", "--merges", "--count", revision))
     titles = git.text(path, "log", "--merges", "--format=%s", "-10", revision).splitlines()
     return {
         "count": count,
         "groups": groups,
         "merges": merges,
-        "merge_subjects": list(map(escape, titles)),
+        "merge_subjects": [escape(cut(title, 200)) for title in titles],
     }

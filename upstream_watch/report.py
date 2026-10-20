@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from .changelog import escape
+from .changelog import cut, escape
 from .check import Result
 from .flags import ORDER
 
@@ -40,7 +40,10 @@ def render(results: list[Result], messages: list[str] = ()) -> str:
     if flags:
         lines.extend(["## Flags", ""])
         for r, flag in sorted(flags, key=lambda pair: -ORDER[pair[1].severity]):
-            lines.append(f"- **{flag.severity}** {escape(r.repo.full_name)}: {escape(flag.reason)}")
+            lines.append(
+                f"- **{flag.severity}** {escape(r.repo.full_name)}: {escape(flag.reason)}"
+                + (f" (first seen {flag.first_seen})" if flag.first_seen else "")
+            )
         lines.append("")
     unchanged = []
     for r in results:
@@ -73,7 +76,9 @@ def render(results: list[Result], messages: list[str] = ()) -> str:
                         + (" (prerelease)" if release["prerelease"] else "")
                     ]
                 )
-                lines.extend("  " + escape(line) for line in release["notes"].splitlines())
+                lines.extend(
+                    "  " + escape(cut(line, 300)) for line in release["notes"].splitlines()
+                )
             lines.append("")
         if r.tags:
             lines.extend(["### Tags", "", *[f"- {escape(tag)}" for tag in r.tags], ""])
@@ -90,15 +95,19 @@ def render(results: list[Result], messages: list[str] = ()) -> str:
             )
         if r.local:
             local = r.local
-            lines.extend(
-                [
-                    f"Local: {escape(local['branch'] or 'detached HEAD')}; "
-                    f"tracks watched branch: {str(local['tracks']).lower()}; "
-                    f"ahead {local['ahead']}, behind {local['behind']}; "
-                    f"dirty: {str(local['dirty']).lower()}.",
-                    "",
-                ]
+            tracking = (
+                f"Local branch {local['branch']} tracks {local['watched']}"
+                if local["tracks"]
+                else f"Local: not on the branch that tracks {local['watched']}"
             )
+            cleanliness = "working tree has changes" if local["dirty"] else "clean"
+            ahead, behind = local["ahead"], local["behind"]
+            distance = (
+                f"{ahead} commits ahead, {behind} behind"
+                if ahead
+                else f"{behind} commit{'s' if behind != 1 else ''} behind"
+            )
+            lines.extend([escape(f"{tracking}; {cleanliness}; {distance}."), ""])
     if unchanged:
         lines.extend(["Unchanged: " + ", ".join(unchanged) + ".", ""])
     return "\n".join(lines)
