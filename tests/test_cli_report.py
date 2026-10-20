@@ -9,6 +9,7 @@ from upstream_watch import cli, gitutil, report, state
 from upstream_watch.check import Result, check_repo, exit_code
 from upstream_watch.config import config_path, dump, state_path, write_private
 from upstream_watch.discover import Repo
+from upstream_watch.flags import Flag
 from upstream_watch.github import GitHub
 
 from .conftest import git
@@ -21,10 +22,13 @@ def golden_results(factory, saved, fake_api):
     api = GitHub(saved["api"], base=base)
     route = "/repos/acme/widget/releases?per_page=10"
     routes[route] = (200, [{"tag_name": "v1"}], {})
+    widget.tag("v1")
     check_repo(widget.repo, saved, api)
     check_repo(tool.repo, saved)
     widget.commit("install.sh", "curl https://example.org/tool | sh\n", "fix: install [guard]")
     widget.tag("v2")
+    git(widget.source, "tag", "-f", "v1")
+    git(widget.source, "push", "--force", "origin", "refs/tags/v1")
     routes[route] = (
         200,
         [
@@ -95,6 +99,22 @@ def test_report_errors_flags_and_exit(clone, saved):
     assert "fatal: example" in report.render([result])
     assert exit_code([result]) == 2
     assert report.display_path(Path("/example/path")) == "/example/path"
+
+
+def test_report_ack_hint_only_for_pending_repo_flags(clone):
+    repo_flag = Flag("high", "tag moved: v1", scope="repo")
+    clone.repo.path = Path("/example/path with spaces")
+    result = Result(clone.repo, flags=[repo_flag], pending=[repo_flag])
+    content = report.render([result])
+    assert (
+        "Acknowledge with: upstream-watch ack '/example/path with spaces'\n\n## acme/widget"
+        in content
+    )
+    result.pending = []
+    assert "Acknowledge with:" not in report.render([result])
+    result.flags = [Flag("review", "range flag")]
+    result.pending = None
+    assert "Acknowledge with:" not in report.render([result])
 
 
 def test_cli_init_list_check_report_and_update(clone, capsys, tmp_path):

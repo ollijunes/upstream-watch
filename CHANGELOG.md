@@ -18,7 +18,9 @@
   conditions for dirty, ahead, detached, in-progress and stale clones, for
   pending `high` flags and for incomplete checks; `auto_update` with
   `auto_update_blocked_by`.
-- Flags stay pending until the clone has caught up or an update succeeds.
+- Flags stay pending: range flags until the clone has caught up or an
+  update succeeds, repository flags until `ack` or an update succeeds.
+- `ack` shows and clears a repository's pending flags.
 - Every git command runs with hooks, maintenance and auto-stash off, with
   explicit fetch refspecs and a tool-owned tag namespace, and with
   repository-selecting `GIT_*` variables removed.

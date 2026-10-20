@@ -121,18 +121,26 @@ def _update_repo(
         )
         if reason:
             return f"skipped: {reason}"
-        if auto and any(
-            f["severity"] in config.auto_update_blocked_by
-            for f in snapshot.get("pending_flags", snapshot.get("flags", []))
-        ):
-            return "skipped: auto_update blocked by flags"
-        incomplete = not snapshot.get("complete", True)
+        pending = snapshot.get("pending_flags", snapshot.get("flags", []))
+        pending_reasons = [
+            flag["reason"].removeprefix("analysis incomplete:").strip()
+            for flag in pending
+            if flag["reason"].startswith("analysis incomplete:")
+        ]
+        incomplete = not snapshot.get("complete", True) or bool(pending_reasons)
         if incomplete:
-            why = "; ".join(snapshot.get("incomplete_reasons", ["unknown"]))
+            why = (
+                "; ".join(
+                    dict.fromkeys([*snapshot.get("incomplete_reasons", []), *pending_reasons])
+                )
+                or "unknown"
+            )
             if auto or auto_only:
                 return f"skipped: analysis incomplete: {why}"
             if show_flags:
                 print(f"{repo.full_name}: analysis incomplete: {why}")
+        if auto and any(f["severity"] in config.auto_update_blocked_by for f in pending):
+            return "skipped: auto_update blocked by flags"
         if dry_run:
             return (
                 f"dry-run: {count} commits; git merge --ff-only --no-autostash -- {snapshot['tip']}"
@@ -154,7 +162,7 @@ def _update_repo(
         if reason:
             return f"skipped: {reason}"
         git.run(repo.path, "merge", "--ff-only", "--no-autostash", "--", snapshot["tip"])
-        snapshot["pending_flags"] = []
+        state.clear_pending(snapshot)
         return "updated"
     except git.GitError as exc:
         return f"update failed: {exc}"

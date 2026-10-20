@@ -126,7 +126,7 @@ def _check_repo(
             for name, sha in tags.items()
             if old and name in old["tags"] and old["tags"][name] != sha
         ]
-        result.flags.extend(Flag("high", f"tag moved: {name}") for name in moved)
+        result.flags.extend(Flag("high", f"tag moved: {name}", scope="repo") for name in moved)
         if fetch.returncode:
             result.status = "fetch failed"
             result.error = git.clean(
@@ -139,7 +139,7 @@ def _check_repo(
         if full_name.casefold() != repo.full_name.casefold() or (
             old and full_name.casefold() != old["full_name"].casefold()
         ):
-            result.flags.append(Flag("high", "repository transferred or renamed"))
+            result.flags.append(Flag("high", "repository transferred or renamed", scope="repo"))
         if repo.metadata.get("archived"):
             result.flags.append(Flag("info", "archived"))
         result.local = git.local_status(repo.path, repo.remote, branch)
@@ -160,7 +160,9 @@ def _check_repo(
                 taggers.add(tagger)
             if old and name in new_tags:
                 if not signature and old["signed_tags"]:
-                    result.flags.append(Flag("review", f"unsigned tag after signed tags: {name}"))
+                    result.flags.append(
+                        Flag("review", f"unsigned tag after signed tags: {name}", scope="repo")
+                    )
                 if tagger and tagger not in old["identities"]:
                     result.flags.append(
                         Flag("review", f"new maintainer signal: new release tagger for {name}")
@@ -175,6 +177,7 @@ def _check_repo(
                             "review",
                             f"tag not API verified: {name} "
                             f"({verification.get('reason', 'unknown')})",
+                            scope="repo",
                         )
                     )
         if api and not api.token:
@@ -244,19 +247,30 @@ def _check_repo(
             )
         for name, sha in tags.items():
             if name in deleted and name not in (old or {}).get("tags", {}) and deleted[name] != sha:
-                result.flags.append(Flag("high", f"tag recreated at a different commit: {name}"))
+                result.flags.append(
+                    Flag("high", f"tag recreated at a different commit: {name}", scope="repo")
+                )
         incomplete.extend(
             f.reason.removeprefix("analysis incomplete: ")
             for f in result.flags
             if f.reason.startswith("analysis incomplete: ")
         )
-        result.flags.extend(Flag("review", f"analysis incomplete: {why}") for why in incomplete)
+        result.flags.extend(
+            Flag("review", f"analysis incomplete: {why}", scope="repo") for why in incomplete
+        )
         current_flags = result.flags
         pending = pending_flags(old, current_flags, now.date().isoformat())
         if result.local["branch"] and git.ref(repo.path, "HEAD") == tip:
-            pending = []
+            pending = [flag for flag in pending if flag.scope == "repo"]
+        incomplete.extend(
+            flag.reason.removeprefix("analysis incomplete:").strip()
+            for flag in pending
+            if flag.reason.startswith("analysis incomplete:")
+        )
         # Keep this check's findings visible even when the local tip is already current.
-        result.flags = pending or result.flags
+        result.flags = list(
+            {(flag.severity, flag.reason): flag for flag in [*current_flags, *pending]}.values()
+        )
         result.pending = pending
         known = identities(repo.path, tip) | taggers | set(old["identities"] if old else [])
         snapshot = {
@@ -291,8 +305,18 @@ def _check_repo(
             incomplete = list(dict.fromkeys([*incomplete, "tool namespace fetch failed"]))
             result.flags = pending_flags(
                 old,
-                [*result.flags, Flag("review", "analysis incomplete: tool namespace fetch failed")],
+                [
+                    *result.flags,
+                    Flag(
+                        "review", "analysis incomplete: tool namespace fetch failed", scope="repo"
+                    ),
+                ],
                 now.date().isoformat(),
+            )
+            incomplete.extend(
+                f.reason.removeprefix("analysis incomplete:").strip()
+                for f in result.flags
+                if f.reason.startswith("analysis incomplete:")
             )
             failed_snapshot = (
                 dict(old)
@@ -316,7 +340,7 @@ def _check_repo(
             )
             failed_snapshot.update(
                 complete=False,
-                incomplete_reasons=incomplete,
+                incomplete_reasons=list(dict.fromkeys(incomplete)),
                 pending_flags=[f.as_dict() for f in result.flags],
             )
             state["repos"][repo.key] = git.scrub(failed_snapshot, api.token if api else None)

@@ -196,6 +196,11 @@ def test_tag_tombstones(clone, saved, changed):
     git(clone.source, "push", "origin", "refs/tags/v1")
     result = check_repo(clone.repo, saved)
     assert any("tag recreated at a different commit" in f.reason for f in result.flags) == changed
+    if changed:
+        recreated = next(f for f in result.pending if "tag recreated" in f.reason)
+        assert recreated.scope == "repo"
+        git(clone.path, "merge", "--ff-only", snapshot(clone, saved)["tip"])
+        assert any(f.reason == recreated.reason for f in check_repo(clone.repo, saved).pending)
     assert snapshot(clone, saved)["deleted_tags"] == {"v1": old}
     assert (
         update_repo(clone.repo, snapshot(clone, saved), clone.config(), yes=True, ignore_flags=True)
@@ -274,13 +279,27 @@ def test_incomplete_prevents_auto_and_requires_prompt(clone, saved):
     snap = snapshot(clone, saved)
     assert snap["complete"] is False
     assert result.highest == "review"
+    first_seen = snap["pending_flags"][0]["first_seen"]
+    clone.commit(content="later analysable change")
+    result = check_repo(clone.repo, saved)
+    snap = snapshot(clone, saved)
+    assert result.commits["count"] == 1
+    assert snap["complete"] is False
+    assert snap["incomplete_reasons"] == ["previous tip no longer available; ancestry unknown"]
+    assert snap["pending_flags"][0]["first_seen"] == first_seen
     assert "analysis incomplete" in update_repo(
-        clone.repo, snap, clone.config(auto_update=["acme/widget"]), yes=True
+        clone.repo,
+        snap,
+        clone.config(auto_update=["acme/widget"], auto_update_blocked_by=[]),
+        yes=True,
     )
     assert "approval required" in update_repo(
         clone.repo, snap, clone.config(), yes=True, stdin=io.StringIO()
     )
     assert update_repo(clone.repo, snap, clone.config(), yes=True, stdin=TTY("y")) == "updated"
+    assert snap["pending_flags"] == []
+    assert snap["complete"] is True
+    assert snap["incomplete_reasons"] == []
 
 
 def test_truncated_tags_and_diff(clone, saved, monkeypatch):
@@ -452,6 +471,10 @@ def test_cli_incomplete_auto_skip_and_failed_check_marker(clone, monkeypatch, ca
     assert cli.main(["check", "--stdout", "--update-allowed"]) == 10
     assert git(clone.path, "rev-parse", "HEAD") == before
     assert "skipped: analysis incomplete" in capsys.readouterr().out
+    clone.commit(content="later analysable change")
+    assert cli.main(["check", "--stdout", "--update-allowed"]) == 10
+    assert git(clone.path, "rev-parse", "HEAD") == before
+    assert "skipped: analysis incomplete" in capsys.readouterr().out
     original = gitutil.run
 
     def fail(path, *args, **kwargs):
@@ -461,6 +484,10 @@ def test_cli_incomplete_auto_skip_and_failed_check_marker(clone, monkeypatch, ca
 
     monkeypatch.setattr(gitutil, "run", fail)
     assert cli.main(["check", "--stdout"]) == 2
+    assert set(state.load(state_path())["repos"][clone.repo.key]["incomplete_reasons"]) == {
+        "previous tip no longer available; ancestry unknown",
+        "tool namespace fetch failed",
+    }
     assert cli.main(["update", "--yes"]) == 10
     assert "last check failed" in capsys.readouterr().out
 

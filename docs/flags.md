@@ -10,9 +10,14 @@ Severities:
   `update` refuses these until you pass `--ignore-flags`, and `auto_update`
   skips them by default.
 
-Flags stay pending across checks until your clone has caught up with the
-remote or an update succeeds. The report shows the date a pending flag was
-first seen.
+Flags stay pending across checks, and the report shows the date each one
+was first seen. Flags about the incoming commits (force-push, changed
+files, new executables, download-to-shell lines, maintainer signal,
+default branch change) are cleared when your clone has caught up with the
+remote or an update through the tool succeeds. Flags about the repository
+itself (tag moved or recreated, unsigned or unverified tag, transfer,
+analysis incomplete) stay until you run `upstream-watch ack <path>` or an
+update through the tool succeeds.
 - `review`: something changed that deserves a look at the diff.
 - `info`: a fact about the clone or the repository that limits the analysis.
 
@@ -139,7 +144,8 @@ was larger than the tool reads, or the tag namespace could not be fetched.
 
 What to do: the report shows what was checked. Run `git fetch --unshallow`
 or look at the repository on GitHub. Repositories with an incomplete check
-are never updated automatically.
+are never updated automatically, and `update` asks even with `--yes`,
+until you acknowledge the flag.
 
 ## info
 

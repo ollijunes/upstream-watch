@@ -89,9 +89,14 @@ turned off for every command the tool runs. A check never runs `pull`,
 `merge` or `checkout`; the one exception is `check --update-allowed`,
 described below.
 
-Flags stay pending until your clone has caught up with the remote or an
-update succeeds. A force-push you have not acted on is still in the next
-report and still blocks `update`.
+Flags stay pending across checks. Flags about the incoming commits, such
+as a force-push or a changed install script, are cleared when your clone
+has caught up with the remote or an update through the tool succeeds.
+Flags about the repository itself, such as a moved tag, a transfer or an
+incomplete analysis, stay until you acknowledge them with
+`upstream-watch ack <path>` or an update through the tool succeeds. A
+force-push you have not acted on is still in the next report and still
+blocks `update`.
 
 The exit code tells a script what it found, in this order: 2 when every
 repository failed to fetch, 20 when a `high` flag is pending, 10 when a
@@ -138,7 +143,15 @@ never falls back to a merge commit or a rebase.
 Without a terminal nothing is updated unless you pass `--yes`. Repositories
 listed in `auto_update` in the config are updated without asking, also by a
 scheduled `check --update-allowed`, unless a flag listed in
-`auto_update_blocked_by` is present. The default blocks on `high`.
+`auto_update_blocked_by` is present. The default blocks on `high`. A
+repository whose last analysis was incomplete is never updated
+automatically and always asks, also with `--yes`.
+
+`upstream-watch ack <path>` shows a repository's pending flags with the
+date each was first seen and clears them after you answer `y`. Without a
+path it goes through every watched repository. `--yes` skips the question;
+without a terminal and without `--yes` nothing is cleared. It changes only
+the tool's state file, never a clone.
 
 ## Schedule
 

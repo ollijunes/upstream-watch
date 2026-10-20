@@ -11,6 +11,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from . import __version__, report, state
+from .ack import acknowledge
 from .check import Result, check_repo, exit_code
 from .config import Config, WatchError, config_path, dump, expand, load, state_path, write_private
 from .discover import discover
@@ -50,6 +51,9 @@ def parser() -> argparse.ArgumentParser:
     update.add_argument("paths", type=Path, nargs="*")
     for flag in ("yes", "dry-run", "allow-untracked", "ignore-flags"):
         update.add_argument("--" + flag, action="store_true")
+    ack = sub.add_parser("ack", help="Acknowledge pending flags without changing clones")
+    ack.add_argument("paths", type=Path, nargs="*")
+    ack.add_argument("--yes", action="store_true")
     sched = sub.add_parser("schedule", help="Print a schedule or manage launchd on macOS")
     sched.add_argument("action", choices=("install", "print", "uninstall"))
     sched.add_argument("--at", default="08:00")
@@ -84,7 +88,7 @@ def initialize(args, path: Path) -> int:
 
 
 def execute(args, token=None) -> int:
-    with state.lock() if args.command in {"check", "update"} else nullcontext():
+    with state.lock() if args.command in {"check", "update", "ack"} else nullcontext():
         return _execute(args, token)
 
 
@@ -106,6 +110,10 @@ def _execute(args, token) -> int:
     config = load(cfg_path)
     saved_path = state_path()
     saved = state.load(saved_path)
+    if args.command == "ack":
+        if acknowledge(config, saved, args.paths, yes=args.yes):
+            state.save(saved_path, saved)
+        return 0
     client = GitHub(saved["api"], token=token)
     if args.command == "update":
         if any(path.resolve() != path.expanduser().absolute() for path in args.paths):

@@ -28,6 +28,12 @@ def save(path: Path, data: dict) -> None:
     write_private(path, (json.dumps(data, indent=2, sort_keys=True) + "\n").encode())
 
 
+def clear_pending(snapshot: dict) -> None:
+    snapshot["pending_flags"] = []
+    snapshot["complete"] = True
+    snapshot["incomplete_reasons"] = []
+
+
 class Busy(WatchError):
     pass
 

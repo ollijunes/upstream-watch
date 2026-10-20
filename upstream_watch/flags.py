@@ -70,6 +70,7 @@ class Flag:
     severity: str
     reason: str
     first_seen: str = ""
+    scope: str = "range"
 
     def as_dict(self):
         return asdict(self)
@@ -153,7 +154,7 @@ def file_flags(path, old: str, new: str) -> tuple[list[Flag], set[str]]:
             max_bytes=DIFF_LIMIT,
         )
         if diff.truncated:
-            flags.append(Flag("review", "analysis incomplete: diff truncated"))
+            flags.append(Flag("review", "analysis incomplete: diff truncated", scope="repo"))
         if any(
             download_to_shell(line[1:])
             for line in diff.stdout.splitlines()

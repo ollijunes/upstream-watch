@@ -151,6 +151,27 @@ def test_auto_block_and_only(clone, checked):
     assert refusal(clone.repo, None) == ("no successful check", 0)
 
 
+@pytest.mark.parametrize("source", ["snapshot", "pending", "both"])
+@pytest.mark.parametrize("auto_only", [True, False])
+def test_pending_incomplete_overrides_snapshot_and_auto_policy(clone, checked, source, auto_only):
+    checked["complete"] = source == "pending"
+    checked["incomplete_reasons"] = [] if source == "pending" else ["missing range"]
+    checked["pending_flags"] = (
+        [{"severity": "review", "reason": "analysis incomplete: missing range", "scope": "repo"}]
+        if source != "snapshot"
+        else []
+    )
+    config = clone.config(auto_update=["acme/widget"], auto_update_blocked_by=[])
+    assert update_repo(clone.repo, checked, config, yes=True, auto_only=auto_only) == (
+        "skipped: analysis incomplete: missing range"
+    )
+    assert update_repo(clone.repo, checked, clone.config(), yes=True, stdin=TTY("n")) == "declined"
+    assert (
+        update_repo(clone.repo, checked, clone.config(), yes=True, stdin=io.StringIO())
+        == "skipped: approval required (non-TTY)"
+    )
+
+
 def test_divergent_pull_failure_untouched(clone, checked):
     # A rewritten upstream must be refused without fetching or changing HEAD.
     git(clone.source, "checkout", "--orphan", "replacement")

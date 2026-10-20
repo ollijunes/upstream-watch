@@ -40,9 +40,11 @@ fixture repositories from the tests and include the affected version.
   in an `Authorization` header, redirects to any other origin are refused,
   and it is removed from every error message, flag, report, cached response
   and state entry before they are written.
-- Flags stay pending in the state until the clone has caught up or an
-  update succeeded, so a `high` flag cannot be cleared by running `check`
-  again.
+- Flags stay pending in the state, so a `high` flag cannot be cleared by
+  running `check` again. Flags about incoming commits clear when the clone
+  has caught up; flags about the repository itself, such as a moved tag, a
+  transfer or an incomplete analysis, clear only through `ack` or an update
+  made with the tool. `ack` changes the state file, never a clone.
 - Commit subjects, release notes and file names from upstream are untrusted
   text. Control characters are stripped and Markdown is escaped before they
   go into the report, so a crafted commit message cannot inject headings or

@@ -82,6 +82,35 @@ def test_moved_tag_updates_tool_namespace(clone, saved):
     assert saved["repos"][clone.repo.key]["tags"] != previous["repos"][clone.repo.key]["tags"]
 
 
+def test_catchup_clears_range_flags_but_keeps_moved_tag(clone, saved):
+    clone.tag("v1")
+    check_repo(clone.repo, saved)
+    clone.commit("install.sh", "echo install\n")
+    git(clone.source, "tag", "-f", "v1")
+    git(clone.source, "push", "--force", "origin", "refs/tags/v1")
+    check_repo(clone.repo, saved)
+    snap = saved["repos"][clone.repo.key]
+    assert {f["scope"] for f in snap["pending_flags"]} == {"repo", "range"}
+    moved = next(f for f in snap["pending_flags"] if f["reason"] == "tag moved: v1")
+    snap["pending_flags"].append({"severity": "review", "reason": "legacy range flag"})
+    git(clone.path, "merge", "--ff-only", snap["tip"])
+    result = check_repo(clone.repo, saved)
+    assert saved["repos"][clone.repo.key]["pending_flags"] == [moved]
+    assert result.highest == "high"
+    assert [f.as_dict() for f in check_repo(clone.repo, saved).pending] == [moved]
+
+
+def test_catchup_keeps_incomplete_analysis(clone, saved):
+    check_repo(clone.repo, saved)
+    saved["repos"][clone.repo.key]["tip"] = "a" * 40
+    check_repo(clone.repo, saved)
+    snap = saved["repos"][clone.repo.key]
+    assert snap["pending_flags"][0]["scope"] == "repo"
+    assert snap["complete"] is False
+    assert check_repo(clone.repo, saved).highest == "review"
+    assert saved["repos"][clone.repo.key]["complete"] is False
+
+
 def test_missing_tip_and_changed_default(clone, saved):
     check_repo(clone.repo, saved)
     saved["repos"][clone.repo.key]["tip"] = "a" * 40
@@ -121,6 +150,8 @@ def test_transfer_archived_fork_detached_and_shallow(factory, saved):
     assert len(first.flags) == 2
     assert "transferred" in reasons(first)
     assert "archived" in reasons(first)
+    assert {f.reason for f in first.pending} == {"repository transferred or renamed"}
+    assert first.pending[0].scope == "repo"
     git(clone.path, "checkout", "--detach")
     second = check_repo(clone.repo, saved)
     assert "shallow" in reasons(second)
@@ -153,6 +184,7 @@ def test_install_ownership_executable_binary_and_pipe(clone, saved):
         "new maintainer signal",
     ):
         assert wanted in reason
+    assert all(flag.scope == "range" for flag in result.flags)
     assert result.highest == "review"
     assert exit_code([result]) == 10
 
@@ -257,6 +289,9 @@ def test_signed_then_unsigned_tags(clone, saved, tmp_path):
     check_repo(clone.repo, saved)
     assert saved["repos"][clone.repo.key]["signed_tags"] == ["v1"]
     clone.tag("v2")
+    result = check_repo(clone.repo, saved)
+    assert "unsigned tag" in reasons(result)
+    assert result.pending[0].scope == "repo"
     assert "unsigned tag" in reasons(check_repo(clone.repo, saved))
 
 
@@ -311,6 +346,7 @@ def test_releases_and_verification(clone, saved, fake_api):
     assert len(result.releases) == 1
     assert len(result.releases[0]["notes"].splitlines()) == 20
     assert "not API verified" in reasons(result)
+    assert result.pending[0].scope == "repo"
     assert "Authorization" not in requests[0][1]
     requests.clear()
     api = GitHub({}, base=base)

@@ -1,6 +1,7 @@
 """Markdown report rendering."""
 
 from pathlib import Path
+from shlex import quote
 
 from .changelog import cut, escape
 from .check import Result
@@ -39,12 +40,20 @@ def render(results: list[Result], messages: list[str] = ()) -> str:
     flags = [(r, flag) for r in results for flag in r.flags]
     if flags:
         lines.extend(["## Flags", ""])
-        for r, flag in sorted(flags, key=lambda pair: -ORDER[pair[1].severity]):
-            lines.append(
-                f"- **{flag.severity}** {escape(r.repo.full_name)}: {escape(flag.reason)}"
-                + (f" (first seen {flag.first_seen})" if flag.first_seen else "")
-            )
-        lines.append("")
+        for r in sorted(
+            (r for r in results if r.flags),
+            key=lambda r: -max(ORDER[f.severity] for f in r.flags),
+        ):
+            for flag in sorted(r.flags, key=lambda flag: -ORDER[flag.severity]):
+                lines.append(
+                    f"- **{flag.severity}** {escape(r.repo.full_name)}: {escape(flag.reason)}"
+                    + (f" (first seen {flag.first_seen})" if flag.first_seen else "")
+                )
+            lines.append("")
+            if any(f.scope == "repo" for f in (r.flags if r.pending is None else r.pending)):
+                path = display_path(r.repo.path)
+                path = "~/" + quote(path[2:]) if path.startswith("~/") else quote(path)
+                lines.extend([f"Acknowledge with: upstream-watch ack {escape(path)}", ""])
     unchanged = []
     for r in results:
         if r.status == "checked" and not (
