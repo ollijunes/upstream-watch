@@ -1,8 +1,8 @@
 # T2 Drop anthropic.com from the privacy allowlist
 
-- Status: doing
+- Status: done
 - Lane: chore/privacy-allowlist-20261020
-- Evidence: —
+- Evidence: `python3 scripts/check_public_tree.py` 0 findings on the full history; pytest and ruff via the verify stamp
 
 ## Plan
 
