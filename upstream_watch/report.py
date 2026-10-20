@@ -103,9 +103,12 @@ def render(results: list[Result], messages: list[str] = ()) -> str:
             cleanliness = "working tree has changes" if local["dirty"] else "clean"
             ahead, behind = local["ahead"], local["behind"]
             distance = (
-                f"{ahead} commits ahead, {behind} behind"
-                if ahead
-                else f"{behind} commit{'s' if behind != 1 else ''} behind"
+                ", ".join(
+                    f"{count} commit{'s' if count != 1 else ''} {direction}"
+                    for count, direction in ((ahead, "ahead"), (behind, "behind"))
+                    if count
+                )
+                or "up to date"
             )
             lines.extend([escape(f"{tracking}; {cleanliness}; {distance}."), ""])
     if unchanged:

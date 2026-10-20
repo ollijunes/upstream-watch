@@ -6,8 +6,9 @@ from pathlib import Path
 import pytest
 
 from upstream_watch import cli, gitutil, report, state
-from upstream_watch.check import check_repo, exit_code
+from upstream_watch.check import Result, check_repo, exit_code
 from upstream_watch.config import config_path, dump, state_path, write_private
+from upstream_watch.discover import Repo
 from upstream_watch.github import GitHub
 
 from .conftest import git
@@ -50,6 +51,39 @@ def test_golden(factory, saved, fake_api):
     content = report.render(results)
     assert content == (Path(__file__).parents[1] / "examples/report.md").read_text()
     assert "Unchanged: example-org/tool" in content
+
+
+@pytest.mark.parametrize(
+    ("ahead", "behind", "distance"),
+    [
+        (0, 0, "up to date"),
+        (1, 0, "1 commit ahead"),
+        (2, 0, "2 commits ahead"),
+        (0, 1, "1 commit behind"),
+        (0, 2, "2 commits behind"),
+        (1, 1, "1 commit ahead, 1 commit behind"),
+        (1, 2, "1 commit ahead, 2 commits behind"),
+        (2, 1, "2 commits ahead, 1 commit behind"),
+        (2, 2, "2 commits ahead, 2 commits behind"),
+    ],
+)
+def test_report_local_distance(tmp_path, ahead, behind, distance):
+    result = Result(
+        repo=Repo(tmp_path, "origin", "acme/widget", str(tmp_path / ".git")),
+        status="baseline recorded",
+        local={
+            "branch": "main",
+            "watched": "origin/main",
+            "tracks": True,
+            "dirty": False,
+            "ahead": ahead,
+            "behind": behind,
+        },
+    )
+    assert (
+        f"Local branch main tracks origin/main; clean; {distance}."
+        in report.render([result]).splitlines()
+    )
 
 
 def test_report_errors_flags_and_exit(clone, saved):
