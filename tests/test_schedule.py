@@ -1,3 +1,4 @@
+import os
 import plistlib
 import shutil
 import subprocess
@@ -44,8 +45,14 @@ def test_systemd(tmp_path):
             target = tmp_path / path.name
             target.write_bytes(data)
             targets.append(str(target))
+        # A user manager needs a runtime directory; CI runners may not have one.
+        runtime = tmp_path / "run"
+        runtime.mkdir(mode=0o700)
         verified = subprocess.run(
-            [binary, "--user", "verify", *targets], capture_output=True, text=True
+            [binary, "--user", "verify", *targets],
+            capture_output=True,
+            text=True,
+            env={**os.environ, "XDG_RUNTIME_DIR": str(runtime)},
         )
         assert verified.returncode == 0, verified.stdout + verified.stderr
     daily = render(tmp_path, tmp_path / "config.toml", platform="systemd")
