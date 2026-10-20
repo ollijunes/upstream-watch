@@ -1,0 +1,9 @@
+{
+  "version": 2,
+  "preset": "solo",
+  "commitStyle": "conventional",
+  "gates": {
+    "commit": [],
+    "verify": []
+  }
+}
