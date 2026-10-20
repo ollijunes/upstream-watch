@@ -42,9 +42,8 @@ ALLOWED_EMAIL_DOMAINS = {
     b"example.org",
     b"example.net",
     b"users.noreply.github.com",
-    b"anthropic.com",
 }
-ALLOWED_EMAIL_ADDRESSES = {b"noreply@github.com"}
+ALLOWED_EMAIL_ADDRESSES = {b"noreply@github.com", b"support@github.com"}
 
 
 def git(*args):
