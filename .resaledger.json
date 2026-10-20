@@ -3,7 +3,12 @@
   "preset": "solo",
   "commitStyle": "conventional",
   "gates": {
-    "commit": [],
-    "verify": []
+    "commit": [
+      "uv run ruff check"
+    ],
+    "verify": [
+      "uv run python -m pytest --cov=upstream_watch --cov-fail-under=90",
+      "uv run ruff format --check ."
+    ]
   }
 }

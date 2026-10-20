@@ -1,0 +1,10 @@
+[Unit]
+Description=Check public upstream repositories
+
+[Service]
+Type=oneshot
+ExecStart="/usr/bin/python3" "-m" "upstream_watch" "--config" "/example/home/.config/upstream-watch/config.toml" "check"
+Environment="PATH=/usr/bin:/usr/local/bin:/example/home/.local/bin:/bin"
+Nice=10
+IOSchedulingClass=idle
+SuccessExitStatus=10 20

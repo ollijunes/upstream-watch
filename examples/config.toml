@@ -1,0 +1,8 @@
+own = ["me-example", "my-org"]
+roots = ["~/src"]
+max_depth = 4
+repos = []
+exclude = []
+auto_update = []
+auto_update_blocked_by = ["high"]
+github_api = true
