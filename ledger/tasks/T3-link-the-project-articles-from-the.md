@@ -1,8 +1,8 @@
 # T3 Link the project articles from the README
 
-- Status: doing
+- Status: done
 - Lane: chore/blog-links-20261021
-- Evidence: —
+- Evidence: both article URLs return HTTP 200 (`curl -sI`); verify stamp committed
 
 ## Plan
 
