@@ -24,6 +24,8 @@ allowlisted.
 [Security](SECURITY.md) · [Contributing](CONTRIBUTING.md) ·
 [ollijunes.com](https://ollijunes.com)
 
+Read the story behind it: [in English](https://ollijunes.com/upstream-watch-git-clones-before-you-pull/) · [suomeksi](https://ollijunes.com/fi/upstream-watch-git-kloonit-ennen-pullia/).
+
 ## Who it is for
 
 People who keep clones of other people's public repositories on their own
